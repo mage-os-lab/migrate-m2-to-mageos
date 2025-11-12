@@ -1,0 +1,22 @@
+{
+  "name": "migrate-m2-to-mageos",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mage-os-lab/migrate-m2-to-mageos.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/mage-os-lab/migrate-m2-to-mageos/issues"
+  },
+  "homepage": "https://github.com/mage-os-lab/migrate-m2-to-mageos#readme",
+  "description": "",
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@types/node": "^24.10.1"
+  }
+}

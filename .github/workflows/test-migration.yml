@@ -1,0 +1,69 @@
+name: test-migration.yaml
+on:
+  - push
+
+jobs:
+  test-migration:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - PHP_VERSION: php83-fpm
+            MAGENTO_VERSION: 2.4.8
+          - PHP_VERSION: php84-fpm
+            MAGENTO_VERSION: 2.4.8-p1
+          - PHP_VERSION: php84-fpm
+            MAGENTO_VERSION: 2.4.8-p2
+          - PHP_VERSION: php84-fpm
+            MAGENTO_VERSION: 2.4.8-p3
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Docker
+        run:
+          docker run --detach
+          -p 80:80
+          -e http://localhost/
+          --name magento-project-community-edition
+          michielgerritsen/magento-project-community-edition:${{ matrix.PHP_VERSION }}-magento${{ matrix.MAGENTO_VERSION }}
+
+      - name: Upload the code into the docker container
+        run: docker cp $(pwd) magento-project-community-edition:/data/extensions/
+
+      - name: Accept composer plugin in advanced
+        run: |
+          docker exec magento-project-community-edition composer config --no-plugins allow-plugins.mage-os/composer-dependency-version-audit-plugin true
+          docker exec magento-project-community-edition composer config --no-plugins allow-plugins.mage-os/magento-composer-installer true
+          docker exec magento-project-community-edition composer config --no-plugins allow-plugins.mage-os/inventory-composer-installer true
+
+      - name: Run migration
+        run: |
+          docker exec -e CI=true magento-project-community-edition bash -c "cat /data/extensions/migrate-m2-to-mageos/migrate-to-mage-os.sh | bash"
+
+      - name: Finish migration
+        run: |
+          docker exec -e CI=true magento-project-community-edition rm -rf var/cache/
+          docker exec -e CI=true magento-project-community-edition php bin/magento
+          docker exec -e CI=true magento-project-community-edition php bin/magento setup:upgrade
+
+      - name: Validate that we can reach the frontend
+        run: curl --fail-with-body http://localhost/
+
+      - name: Install Playwright dependencies
+        run: |
+          npm install
+          npx playwright install --with-deps
+
+      - name: Run Playwright tests
+        id: playwright
+        run: |
+          docker exec -e CI=true magento-project-community-edition php bin/magento module:disable Magento_TwoFactorAuth -f
+          TEST_BASE_URL=http://localhost/ npx playwright test
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.playwright.outcome == 'failure'
+        with:
+          name: playwright-report
+          path: playwright-report/
