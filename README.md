@@ -17,7 +17,7 @@ Before running this migration script, ensure your environment meets the followin
 Run the script directly from the repository:
 
 ```bash
-curl -s https://raw.githubusercontent.com/mage-os-lab/migrate-m2-to-mageos/refs/heads/main/migrate-to-mage-os.sh | bash
+bash <(curl -s https://raw.githubusercontent.com/mage-os-lab/migrate-m2-to-mageos/refs/heads/main/migrate-to-mage-os.sh)
 ```
 
 ### Option 2: Download and Execute
