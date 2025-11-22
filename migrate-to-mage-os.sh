@@ -76,7 +76,25 @@ echo -e "${GREEN}Ready to migrate from Magento to Mage-OS${NC}"
 
 # Get the Magento version
 echo "Checking your Magento version"
-MAGENTO_VERSION=$($PHP_CMD bin/magento --version 2>&1 | grep -oP 'Magento CLI \K[0-9]+\.[0-9]+\.[0-9]+')
+VERSION_OUTPUT=$($PHP_CMD bin/magento --version 2>&1)
+MAGENTO_VERSION=$(printf "%s" "$VERSION_OUTPUT" | awk '{
+    for (i=1; i<=NF; i++) {
+        token = $i
+        gsub(/^[^0-9]*/, "", token)
+        gsub(/[^0-9A-Za-z.\-].*$/, "", token)
+        if (token ~ /^2\.4\.8/) {
+            print token
+            exit
+        }
+    }
+}')
+
+if [[ -z "$MAGENTO_VERSION" ]]; then
+    echo -e "${RED}Error: This script only supports Magento 2.4.8${NC}"
+    echo -e "${RED}Version output:${NC} $VERSION_OUTPUT"
+    echo -e "${YELLOW}It is important to upgrade your store to the latest Magento version before upgrading to Mage-OS.${NC}"
+    exit 1
+fi
 
 # Check if version is 2.4.8
 if [[ "$MAGENTO_VERSION" != 2.4.8* ]]; then
@@ -206,6 +224,83 @@ flush_redis_db() {
 # Add the Mage-OS repository, so Composer know where to download the packages from
 $COMPOSER_CMD config repositories.mage-os composer https://repo.mage-os.org/ --no-interaction
 
+# Ensure composer.json name matches Mage-OS
+$PHP_CMD -r '
+    $path = "composer.json";
+    if (!file_exists($path)) {
+        fwrite(STDERR, "composer.json not found\n");
+        exit(1);
+    }
+
+    $composer = json_decode(file_get_contents($path), true);
+    if ($composer === null || json_last_error() !== JSON_ERROR_NONE) {
+        fwrite(STDERR, "Unable to parse composer.json\n");
+        exit(1);
+    }
+
+    $current = $composer["name"] ?? "";
+    if ($current === "magento/project-community-edition") {
+        $composer["name"] = "mage-os/project-community-edition";
+        file_put_contents(
+            $path,
+            json_encode($composer, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL
+        );
+        echo "Updated composer.json name to mage-os/project-community-edition\n";
+    } else {
+        echo "composer.json name already set to: " . ($current === "" ? "(none)" : $current) . "\n";
+    }
+'
+
+# Convert magento/* entries in composer.json replace to mage-os/*
+$PHP_CMD -r '
+    $path = "composer.json";
+    if (!file_exists($path)) {
+        fwrite(STDERR, "composer.json not found\n");
+        exit(1);
+    }
+
+    $composer = json_decode(file_get_contents($path), true);
+    if (!is_array($composer)) {
+        fwrite(STDERR, "Unable to parse composer.json\n");
+        exit(1);
+    }
+
+    if (empty($composer["replace"]) || !is_array($composer["replace"])) {
+        echo "No replace section in composer.json\n";
+        exit(0);
+    }
+
+    $removed = 0;
+    $added = 0;
+    foreach (array_keys($composer["replace"]) as $package) {
+        if (strpos($package, "magento/") !== 0) {
+            continue;
+        }
+
+        $mageOsPackage = "mage-os/" . substr($package, strlen("magento/"));
+        if (!isset($composer["replace"][$mageOsPackage])) {
+            $composer["replace"][$mageOsPackage] = $composer["replace"][$package];
+            $added++;
+        }
+
+        unset($composer["replace"][$package]);
+        $removed++;
+    }
+
+    if ($removed > 0 || $added > 0) {
+        if ($composer["replace"] === []) {
+            unset($composer["replace"]);
+        }
+        file_put_contents(
+            $path,
+            json_encode($composer, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL
+        );
+        echo "Converted {$removed} magento/* entries to mage-os/* (added {$added}, removed {$removed})\n";
+    } else {
+        echo "No magento/* entries found in composer.json replace\n";
+    }
+'
+
 # This actually installs Mage-OS
 if ! package_exists "mage-os/product-community-edition"; then
     echo "Adding mage-os/product-community-edition to composer.json"
@@ -279,9 +374,11 @@ while [ "$UPDATE_SUCCESS" = false ]; do
         echo -e "${YELLOW}https://mage-os.org/discord-channel/${NC}"
         echo ""
 
-        read -p "Would you like to retry the composer update? (yes/no): " -r
+        read -p "Would you like to retry the composer update? (Yes/no): " -r
         echo ""
-        if [[ ! $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
+        if [[ -z "$REPLY" || "$REPLY" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+            echo "Retrying composer update..."
+        else
             echo -e "${RED}Migration cancelled.${NC}"
             exit 1
         fi
