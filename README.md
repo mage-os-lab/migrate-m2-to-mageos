@@ -35,6 +35,18 @@ chmod +x migrate-to-mage-os.sh
 ./migrate-to-mage-os.sh
 ```
 
+### Options
+
+- `--no-security-blocking`: lets the `composer update` step proceed past composer security advisories instead of halting on them. By default the migration respects advisories; only add this flag when an advisory is expected and you have reviewed it. If the update fails because of an advisory, the script detects it and reminds you of this option.
+
+```bash
+# Direct execution
+bash <(curl -s https://raw.githubusercontent.com/mage-os-lab/migrate-m2-to-mageos/refs/heads/main/migrate-to-mage-os.sh) --no-security-blocking
+
+# Downloaded script
+./migrate-to-mage-os.sh --no-security-blocking
+```
+
 ## After Migration
 
 Make sure to check your installation thoroughly before deploying to production.

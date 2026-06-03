@@ -14,6 +14,21 @@ NC='\033[0m' # No Color
 REQUIRED_PHP_VERSION="8.4.0"
 REQUIRED_MAGENTO_VERSION="2.4.9"
 
+# Parse script arguments
+NO_SECURITY_BLOCKING=false
+for arg in "$@"; do
+    case "$arg" in
+        --no-security-blocking)
+            NO_SECURITY_BLOCKING=true
+            ;;
+        *)
+            echo -e "${RED}Unknown option: ${arg}${NC}"
+            echo -e "${YELLOW}Usage: $0 [--no-security-blocking]${NC}"
+            exit 1
+            ;;
+    esac
+done
+
 # WARNING: Do not execute this script on a production environment
 if [[ -z "${CI:-}" ]]; then
     echo -e "${YELLOW}==========================================${NC}"
@@ -259,6 +274,11 @@ flush_redis_db() {
 # Add the Mage-OS repository, so Composer know where to download the packages from
 $COMPOSER_CMD config repositories.mage-os composer https://repo.mage-os.org/ --no-interaction
 
+# Allow the Mage-OS composer plugins to run. The Magento 2.4.8 root composer.json only allow-lists
+# magento/*, so the mage-os/* equivalents pulled in by the upgrade (magento-composer-installer,
+# composer-dependency-version-audit-plugin, ...) would otherwise be blocked by allow-plugins.
+$COMPOSER_CMD config --no-interaction "allow-plugins.mage-os/*" true
+
 # Ensure composer.json name matches Mage-OS
 $PHP_CMD -r '
     $path = "composer.json";
@@ -390,10 +410,19 @@ else
 fi
 
 # Actually run the update.
+SECURITY_BLOCKING_FLAG=""
+if [ "$NO_SECURITY_BLOCKING" = true ]; then
+    echo -e "${YELLOW}Running with --no-security-blocking: composer security advisories will not block the update.${NC}"
+    SECURITY_BLOCKING_FLAG="--no-security-blocking"
+fi
+
+UPDATE_LOG=$(mktemp)
+trap 'rm -f "$UPDATE_LOG"' EXIT
+
 UPDATE_SUCCESS=false
 while [ "$UPDATE_SUCCESS" = false ]; do
     echo "Running composer update..."
-    if $COMPOSER_CMD update --no-plugins --with-all-dependencies --no-security-blocking --no-interaction; then
+    if $COMPOSER_CMD update --no-plugins --with-all-dependencies $SECURITY_BLOCKING_FLAG --no-interaction 2>&1 | tee "$UPDATE_LOG"; then
         UPDATE_SUCCESS=true
         echo -e "${GREEN}Composer update completed successfully${NC}"
     else
@@ -405,6 +434,16 @@ while [ "$UPDATE_SUCCESS" = false ]; do
         echo -e "${YELLOW}It seems that the \`composer update\` command failed.${NC}"
         echo -e "${YELLOW}Please take a look at the errors reported, see if you can fix them and try again.${NC}"
         echo ""
+
+        # Detect a failure caused by a blocking security advisory and point to the opt-out flag
+        if [ "$NO_SECURITY_BLOCKING" = false ] && grep -qiE "security|advisor|vulnerab" "$UPDATE_LOG"; then
+            echo -e "${YELLOW}This looks like it was blocked by a composer security advisory.${NC}"
+            echo -e "${YELLOW}If that advisory is expected, you can re-run the migration with the${NC}"
+            echo -e "${YELLOW}--no-security-blocking option to let the update proceed past it:${NC}"
+            echo -e "${YELLOW}    $0 --no-security-blocking${NC}"
+            echo ""
+        fi
+
         echo -e "${YELLOW}If you need help with this step you can always ask for help at the Mage-OS Discord channel:${NC}"
         echo -e "${YELLOW}https://mage-os.org/discord-channel/${NC}"
         echo ""
@@ -419,6 +458,13 @@ while [ "$UPDATE_SUCCESS" = false ]; do
         fi
     fi
 done
+
+# The composer update above ran with --no-plugins, so the Mage-OS composer installer did not (re)deploy the
+# base files (setup/, app/etc, bin/, pub/) into the project root. Without this they stay at their Magento
+# 2.4.8 versions and break setup:upgrade (e.g. setup/src/Magento/Setup/Application.php referencing classes
+# that Mage-OS 3.0 removed). Reinstall the base package now that only mage-os/* is present.
+echo "Deploying Mage-OS base files (setup/, app/etc, bin/, pub/) ..."
+$COMPOSER_CMD reinstall mage-os/magento2-base --no-interaction
 
 echo ""
 echo "Verifying Mage-OS installation..."
