@@ -466,6 +466,41 @@ done
 echo "Deploying Mage-OS base files (setup/, app/etc, bin/, pub/) ..."
 $COMPOSER_CMD reinstall mage-os/magento2-base --no-interaction
 
+# The Mage-OS 3.0 base files just deployed reference the MageOS\Installer namespace (setup/src/MageOS/Installer),
+# but a composer.json migrated from Magento lacks the matching psr-4 autoload entry that a clean Mage-OS skeleton
+# ships with. Without it, setup:upgrade fatals: Class "MageOS\Installer\Console\Command\InstallCommand" not found.
+echo "Ensuring MageOS\\Installer\\ autoload entry in composer.json ..."
+$PHP_CMD -r '
+    $path = "composer.json";
+    if (!file_exists($path)) {
+        fwrite(STDERR, "composer.json not found\n");
+        exit(1);
+    }
+
+    $composer = json_decode(file_get_contents($path), true);
+    if (!is_array($composer)) {
+        fwrite(STDERR, "Unable to parse composer.json\n");
+        exit(1);
+    }
+
+    $prefix = "MageOS\\Installer\\";
+    $target = "setup/src/MageOS/Installer/";
+    if (($composer["autoload"]["psr-4"][$prefix] ?? null) === $target) {
+        echo "composer.json already has the MageOS\\Installer\\ autoload entry\n";
+        exit(0);
+    }
+
+    $composer["autoload"]["psr-4"][$prefix] = $target;
+    file_put_contents(
+        $path,
+        json_encode($composer, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL
+    );
+    echo "Added MageOS\\Installer\\ psr-4 autoload entry to composer.json\n";
+'
+
+# Regenerate the autoloader so the new psr-4 mapping is picked up before setup:upgrade runs.
+$COMPOSER_CMD dump-autoload --no-interaction
+
 echo ""
 echo "Verifying Mage-OS installation..."
 echo "Note: You may be prompted to accept Mage-OS plugins. Please review and accept them."
