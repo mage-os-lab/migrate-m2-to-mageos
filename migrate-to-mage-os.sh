@@ -11,7 +11,7 @@ GREEN='\033[0;32m'
 NC='\033[0m' # No Color
 
 # Version requirements
-REQUIRED_PHP_VERSION="8.4.0"
+REQUIRED_PHP_VERSION="8.3.0"
 REQUIRED_MAGENTO_VERSION="2.4.9"
 
 # Parse script arguments
