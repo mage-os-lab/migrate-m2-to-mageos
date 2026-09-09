@@ -412,7 +412,7 @@ else
     echo "Magento packages already removed, skipping"
 fi
 
-TARGET_VERSION="3.4.0"
+TARGET_VERSION="3.5.0"
 # Base = the last Mage-OS release before the 3.x line. Its project skeleton lacks the "MageOS\Installer\"
 # psr-4 entry (added in the 3.x line), so the 2.3.0 -> 3.1.0 delta is exactly what needs merging.
 # We supply it explicitly because the lock still references magento/* — which the plugin cannot use as
